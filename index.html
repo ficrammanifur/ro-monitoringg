@@ -1,24 +1,21 @@
-<!-- index.html -->
 <!DOCTYPE html>
 <html lang="id">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Smart RO Water Quality Monitor</title>
-    <!-- Favicon -->
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌊</text></svg>">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💧</text></svg>">
     
-    <!-- Google Fonts for Modern Look -->
+    <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     
-    <!-- Tailwind CSS (CDN) for styling -->
+    <!-- Tailwind CSS (CDN) - Note: Gunakan untuk development, untuk production gunakan PostCSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     
     <!-- Chart.js & MQTT.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mqtt@5.0.0/dist/mqtt.min.js"></script>
 
-    <!-- Tailwind Config for Custom Theme -->
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -53,7 +50,6 @@
         }
     </script>
 
-    <!-- Custom Styles -->
     <link rel="stylesheet" href="style.css">
 </head>
 <body class="p-4 md:p-8">
@@ -63,10 +59,9 @@
 
     <div class="max-w-7xl mx-auto flex flex-col gap-8">
         
-        <!-- HEADER: Completely redesigned to look like a control panel console -->
+        <!-- ============ HEADER ============ -->
         <header class="glass-panel px-6 py-5 flex flex-col lg:flex-row justify-between items-center gap-6 border-t-2 border-t-ocean-accent/30">
             
-            <!-- Branding -->
             <div class="flex items-center gap-4">
                 <div class="relative w-14 h-14 flex items-center justify-center rounded-2xl bg-gradient-to-br from-ocean-700 to-ocean-900 border border-ocean-accent/20 shadow-neon-glow">
                     <span class="text-3xl filter drop-shadow-md">💧</span>
@@ -78,16 +73,13 @@
                 </div>
             </div>
 
-            <!-- Global Status Cluster -->
             <div class="flex flex-wrap items-center justify-center gap-4">
                 
-                <!-- Main Connection -->
                 <div id="connectionContainer" class="flex items-center gap-3 px-4 py-2 rounded-xl bg-ocean-800/50 border border-white/5">
                     <span id="connectionDot" class="status-dot text-ocean-warning bg-ocean-warning pulse-slow"></span>
                     <span id="connectionText" class="text-sm font-semibold text-white/80">Connecting Server...</span>
                 </div>
 
-                <!-- Sub-systems -->
                 <div class="flex gap-2">
                     <div id="mqttBadge" class="px-3 py-1.5 rounded-lg bg-black/40 border border-ocean-danger/30 flex items-center gap-2">
                         <span class="status-dot w-2 h-2 text-ocean-danger bg-ocean-danger"></span>
@@ -95,11 +87,10 @@
                     </div>
                     <div id="espBadge" class="px-3 py-1.5 rounded-lg bg-black/40 border border-ocean-danger/30 flex items-center gap-2">
                         <span class="status-dot w-2 h-2 text-ocean-danger bg-ocean-danger"></span>
-                        <span class="text-xs font-mono text-white/60">ESP32 Node</span>
+                        <span class="text-xs font-mono text-white/60">ESP32</span>
                     </div>
                 </div>
 
-                <!-- Clock -->
                 <div class="px-4 py-2 rounded-xl bg-black/20 border border-white/5 flex items-center gap-2">
                     <svg class="w-4 h-4 text-ocean-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                     <span id="lastUpdate" class="font-mono text-sm text-ocean-accent/80">--:--:--</span>
@@ -107,10 +98,10 @@
             </div>
         </header>
 
-        <!-- MAIN DASHBOARD AREA -->
+        <!-- ============ MAIN DASHBOARD ============ -->
         <main class="grid grid-cols-1 md:grid-cols-12 gap-6 lg:gap-8">
             
-            <!-- LEFT COLUMN: Primary Vital Stats (Larger Cards) -->
+            <!-- ============ LEFT COLUMN ============ -->
             <div class="md:col-span-5 lg:col-span-4 flex flex-col gap-6">
                 
                 <!-- HERO CARD: Water Status -->
@@ -164,7 +155,7 @@
                     </div>
                 </div>
 
-                <!-- FILTER REPLACEMENT CARD (BARU) -->
+                <!-- FILTER REPLACEMENT CARD -->
                 <div class="glass-panel p-5" id="filter-replacement-card">
                     <h3 class="text-xs font-bold text-ocean-accent uppercase tracking-[0.2em] mb-3">🔧 Filter Replacement Status</h3>
                     <div class="grid grid-cols-2 md:grid-cols-2 gap-3">
@@ -189,10 +180,10 @@
 
             </div>
 
-            <!-- RIGHT COLUMN: Metrics Grid & Charts -->
+            <!-- ============ RIGHT COLUMN ============ -->
             <div class="md:col-span-7 lg:col-span-8 flex flex-col gap-6">
                 
-                <!-- The 4-Grid Parameters -->
+                <!-- 4-Grid Parameters -->
                 <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
                     
                     <!-- pH Card -->
@@ -248,7 +239,7 @@
 
                 </div>
 
-                <!-- Charts Area - Two columns on large screens -->
+                <!-- Charts Area -->
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 h-full">
                     
                     <!-- pH Chart -->
@@ -279,7 +270,7 @@
             </div>
         </main>
 
-        <!-- Footer / System Logs -->
+        <!-- ============ FOOTER ============ -->
         <footer class="glass-panel px-6 py-4 flex flex-wrap justify-between items-center gap-4 text-xs font-mono text-white/40">
             <div class="flex gap-4">
                 <div class="flex items-center gap-2">
@@ -299,7 +290,6 @@
         </footer>
     </div>
 
-    <!-- Script -->
     <script src="script.js"></script>
 </body>
 </html>
