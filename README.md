@@ -1,6 +1,5 @@
 # 📄 README.md - Dashboard
 
-```markdown
 <h1 align="center">💧 SMART RO WATER QUALITY MONITOR</h1>
 
 <p align="center">
