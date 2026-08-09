@@ -36,6 +36,10 @@
 
 **Smart RO Water Quality Monitor** adalah sistem monitoring kualitas air Reverse Osmosis secara real-time menggunakan ESP32. Sistem ini memantau parameter penting seperti pH, TDS, Kekeruhan, Suhu, dan Volume produksi, kemudian menampilkan status "LAYAK" atau "TIDAK LAYAK" melalui dashboard web yang dapat diakses dari mana saja.
 
+## 🌐 Live Dashboard
+
+👉 [Open Smart RO Console](https://wahyukurniaw4an.github.io/ro-monitoringg/)
+
 ### 🎯 Fitur Utama
 - Monitoring 5 parameter sensor secara simultan
 - Penilaian otomatis kualitas air (Rule-based)
