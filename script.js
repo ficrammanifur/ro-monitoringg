@@ -1,4 +1,3 @@
-// script.js
 // ==================== CONFIG ====================
 const MQTT_BROKER = "wss://broker.hivemq.com:8884/mqtt";
 const MQTT_TOPIC = "watermon/all";
@@ -6,7 +5,6 @@ const MQTT_TOPIC = "watermon/all";
 let client = null;
 let messageCount = 0;
 
-// Theme colors for JS manipulation
 const THEME = {
     accent: '#00F0FF',
     success: '#00FF66',
@@ -16,38 +14,31 @@ const THEME = {
     textMuted: 'rgba(255,255,255,0.4)'
 };
 
-// Cache DOM elements
+// ==================== DOM CACHE ====================
 const DOM = {
     connContainer: document.getElementById('connectionContainer'),
     connDot: document.getElementById('connectionDot'),
     connText: document.getElementById('connectionText'),
-
     mqttBadge: document.getElementById('mqttBadge'),
     espBadge: document.getElementById('espBadge'),
     lastUpdate: document.getElementById('lastUpdate'),
     dataCount: document.getElementById('dataCount'),
     lastMessage: document.getElementById('lastMessage'),
-
     waterStatusText: document.getElementById('waterStatusText'),
     statusIconWrapper: document.getElementById('statusIconWrapper'),
     statusDetail: document.getElementById('statusDetail'),
-
     filterHealth: document.getElementById('filterHealth'),
     healthBar: document.getElementById('healthBar'),
     daysLeft: document.getElementById('daysLeft'),
     volumeTotal: document.getElementById('volumeTotal'),
-
     phValue: document.getElementById('phValue'),
     tdsValue: document.getElementById('tdsValue'),
     turbidityValue: document.getElementById('turbidityValue'),
     tempValue: document.getElementById('tempValue'),
-
     phBadge: document.getElementById('phBadge'),
     tdsBadge: document.getElementById('tdsBadge'),
     turbBadge: document.getElementById('turbBadge'),
     tempBadge: document.getElementById('tempBadge'),
-    
-    // Filter replacement DOM elements
     filterReplaceStatus: document.getElementById('filterReplaceStatus'),
     filterReplaceScore: document.getElementById('filterReplaceScore'),
     filterReplaceReason: document.getElementById('filterReplaceReason'),
@@ -56,13 +47,13 @@ const DOM = {
 
 let charts = null;
 
-// ==================== CHARTS CONFIG ====================
+// ==================== CHARTS ====================
 Chart.defaults.color = 'rgba(255,255,255,0.5)';
 Chart.defaults.font.family = "'JetBrains Mono', monospace";
 Chart.defaults.font.size = 10;
 
 function initCharts() {
-    const createChartOptions = (borderColor, bgColor) => ({
+    const createChartOptions = (borderColor, bgColor, minY, maxY) => ({
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
@@ -79,7 +70,7 @@ function initCharts() {
                 displayColors: false,
                 callbacks: {
                     label: function(context) {
-                        return `Value: ${context.parsed.y}`;
+                        return `Value: ${context.parsed.y.toFixed(2)}`;
                     }
                 }
             }
@@ -90,7 +81,8 @@ function initCharts() {
                 ticks: { maxTicksLimit: 6, maxRotation: 0 }
             },
             y: {
-                beginAtZero: false,
+                min: minY || 0,
+                max: maxY || 100,
                 grid: { color: 'rgba(255,255,255,0.05)', borderDash: [2, 4], drawBorder: false }
             }
         },
@@ -134,7 +126,20 @@ function initCharts() {
                     fill: true
                 }]
             },
-            options: { ...createChartOptions(THEME.accent), scales: { y: { min: 0, max: 14, ...createChartOptions(THEME.accent).scales.y } } }
+            options: { 
+                ...createChartOptions(THEME.accent, null, 0, 14),
+                scales: {
+                    y: { 
+                        min: 0, 
+                        max: 14,
+                        grid: { color: 'rgba(255,255,255,0.05)', borderDash: [2, 4], drawBorder: false }
+                    },
+                    x: {
+                        grid: { display: false, drawBorder: false },
+                        ticks: { maxTicksLimit: 6, maxRotation: 0 }
+                    }
+                }
+            }
         }),
         tds: new Chart(tdsCtx, {
             type: 'line',
@@ -147,12 +152,25 @@ function initCharts() {
                     fill: true
                 }]
             },
-            options: { ...createChartOptions(THEME.success), scales: { y: { min: 0, max: 500, ...createChartOptions(THEME.success).scales.y } } }
+            options: { 
+                ...createChartOptions(THEME.success, null, 0, 500),
+                scales: {
+                    y: { 
+                        min: 0, 
+                        max: 500,
+                        grid: { color: 'rgba(255,255,255,0.05)', borderDash: [2, 4], drawBorder: false }
+                    },
+                    x: {
+                        grid: { display: false, drawBorder: false },
+                        ticks: { maxTicksLimit: 6, maxRotation: 0 }
+                    }
+                }
+            }
         })
     };
 }
 
-// ==================== MQTT LOGIC ====================
+// ==================== MQTT ====================
 function connectToMQTT() {
     client = mqtt.connect(MQTT_BROKER, {
         clientId: 'nexus_dash_' + Math.random().toString(16).substr(2, 8),
@@ -164,11 +182,8 @@ function connectToMQTT() {
         DOM.connText.className = "text-sm font-bold text-ocean-accent tracking-widest";
         DOM.connDot.className = "status-dot bg-ocean-accent shadow-neon-glow";
         DOM.connContainer.className = "flex items-center gap-3 px-4 py-2 rounded-xl bg-ocean-accent/10 border border-ocean-accent/30";
-
         updateMiniBadge(DOM.mqttBadge, true, "MQTT LINKED");
-
         updateMiniBadge(DOM.espBadge, false, "AWAITING NODE", THEME.warning);
-
         client.subscribe(MQTT_TOPIC);
     });
 
@@ -177,7 +192,6 @@ function connectToMQTT() {
         DOM.connText.className = "text-sm font-bold text-ocean-danger tracking-widest";
         DOM.connDot.className = "status-dot bg-ocean-danger";
         DOM.connContainer.className = "flex items-center gap-3 px-4 py-2 rounded-xl bg-ocean-danger/10 border border-ocean-danger/30";
-
         updateMiniBadge(DOM.mqttBadge, false, "MQTT OFFLINE", THEME.danger);
         updateMiniBadge(DOM.espBadge, false, "NODE OFFLINE", THEME.danger);
     });
@@ -185,18 +199,13 @@ function connectToMQTT() {
     client.on("message", (topic, message) => {
         try {
             const data = JSON.parse(message.toString());
-
             updateMiniBadge(DOM.espBadge, true, "NODE ACTIVE", THEME.success);
-
             messageCount++;
             DOM.dataCount.textContent = `RX: ${messageCount} PKT`;
-
             const now = new Date();
             DOM.lastUpdate.textContent = now.toLocaleTimeString('en-US', { hour12: false });
             DOM.lastMessage.textContent = `Last sig: ${now.getSeconds()}s ago`;
-
             processIncomingData(data);
-
         } catch (e) {
             console.error("Payload parse error:", e);
         }
@@ -206,7 +215,6 @@ function connectToMQTT() {
 function updateMiniBadge(element, isGood, text, colorCode = THEME.success) {
     const dot = element.querySelector('.status-dot');
     const span = element.querySelector('span:last-child');
-
     span.textContent = text;
     if (isGood) {
         element.style.borderColor = `rgba(${hexToRgb(colorCode)}, 0.3)`;
@@ -228,8 +236,7 @@ function hexToRgb(hex) {
     return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '255,255,255';
 }
 
-// ==================== DATA PROCESSING & UI UPDATE ====================
-
+// ==================== DATA PROCESSING ====================
 function styleValueBadge(element, condition, textGood, textBad) {
     if (condition) {
         element.textContent = textGood;
@@ -259,14 +266,15 @@ function processIncomingData(data) {
         styleValueBadge(DOM.tempBadge, data.temperature > 15 && data.temperature < 35, "NOMINAL", "ALERT");
     }
 
-    // 2. Main Water Status Hero Card
+    // 2. Water Status
     if (data.status) {
-        if (data.status.toUpperCase() === 'LAYAK' || data.status.toUpperCase() === 'SAFE') {
+        const status = data.status.toUpperCase();
+        if (status === 'LAYAK' || status === 'SAFE') {
             DOM.waterStatusText.textContent = "SAFE TO DRINK";
-            DOM.waterStatusText.className = "text-3xl font-extrabold tracking-tight z-10 text-ocean-success mb-1 text-shadow-sm";
+            DOM.waterStatusText.className = "text-3xl font-extrabold tracking-tight z-10 text-ocean-success mb-1";
             DOM.statusIconWrapper.innerHTML = `<svg class="w-16 h-16 text-ocean-success" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`;
             DOM.statusDetail.textContent = "Semua parameter dalam batas normal";
-        } else if (data.status.toUpperCase() === 'CUKUP') {
+        } else if (status === 'CUKUP') {
             DOM.waterStatusText.textContent = "CAUTION";
             DOM.waterStatusText.className = "text-3xl font-extrabold tracking-tight z-10 text-ocean-warning mb-1";
             DOM.statusIconWrapper.innerHTML = `<svg class="w-16 h-16 text-ocean-warning" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>`;
@@ -284,7 +292,6 @@ function processIncomingData(data) {
         const health = data.health;
         DOM.filterHealth.textContent = health.toFixed(0);
         DOM.healthBar.style.width = health + '%';
-        
         if (health < 50) {
             DOM.healthBar.style.background = 'linear-gradient(90deg, #FF2A54, #FFD700)';
         } else if (health < 70) {
@@ -293,16 +300,14 @@ function processIncomingData(data) {
             DOM.healthBar.style.background = 'linear-gradient(90deg, #00F0FF, #00FF66)';
         }
     }
-    
     if (data.days_left !== undefined) {
         DOM.daysLeft.textContent = data.days_left + ' Days';
     }
-    
     if (data.volume !== undefined) {
         DOM.volumeTotal.textContent = data.volume.toFixed(1) + ' L';
     }
 
-    // 4. Filter Replacement Status (BARU)
+    // 4. Filter Replacement
     if (data.filter_need_replacement !== undefined) {
         updateFilterReplacement({
             needReplacement: data.filter_need_replacement,
@@ -312,7 +317,7 @@ function processIncomingData(data) {
         });
     }
 
-    // 5. Update Charts
+    // 5. Charts
     const now = new Date();
     const timeLabel = now.getHours().toString().padStart(2,'0') + ':' + 
                       now.getMinutes().toString().padStart(2,'0');
@@ -327,7 +332,6 @@ function processIncomingData(data) {
             }
             charts.ph.update();
         }
-        
         if (data.tds !== undefined) {
             charts.tds.data.labels.push(timeLabel);
             charts.tds.data.datasets[0].data.push(data.tds);
@@ -340,7 +344,7 @@ function processIncomingData(data) {
     }
 }
 
-// ==================== FILTER REPLACEMENT DISPLAY (BARU) ====================
+// ==================== FILTER REPLACEMENT ====================
 function updateFilterReplacement(data) {
     if (!data) return;
     
@@ -353,7 +357,7 @@ function updateFilterReplacement(data) {
         if (needReplace) {
             DOM.filterReplaceStatus.textContent = "⚠️ SEGERA GANTI FILTER";
             DOM.filterReplaceStatus.className = "text-sm font-bold text-ocean-danger tracking-wider animate-pulse";
-        } else if (filterScore < 70) {
+        } else if (filterScore < 60) {
             DOM.filterReplaceStatus.textContent = "🔄 Persiapan Ganti Filter";
             DOM.filterReplaceStatus.className = "text-sm font-bold text-ocean-warning tracking-wider";
         } else {
@@ -361,15 +365,12 @@ function updateFilterReplacement(data) {
             DOM.filterReplaceStatus.className = "text-sm font-bold text-ocean-success tracking-wider";
         }
     }
-    
     if (DOM.filterReplaceScore) {
         DOM.filterReplaceScore.textContent = filterScore.toFixed(0) + "%";
     }
-    
     if (DOM.filterReplaceReason) {
         DOM.filterReplaceReason.textContent = filterReason;
     }
-    
     if (DOM.filterReplaceRecommend) {
         DOM.filterReplaceRecommend.textContent = filterRecommend;
     }
