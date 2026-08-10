@@ -2,6 +2,7 @@
  * ============================================================
  * SMART RO WATER QUALITY MONITOR - MQTT Web Client
  * FULLY SYNCHRONIZED WITH ESP32 .ino
+ * WITH FILTER STATUS: NORMAL / CEK / GANTI
  * ============================================================
  */
 
@@ -39,6 +40,7 @@ const DOM = {
     tempBadge: document.getElementById('tempBadge'),
     filterReplaceStatus: document.getElementById('filterReplaceStatus'),
     filterReplaceScore: document.getElementById('filterReplaceScore'),
+    filterReplaceDays: document.getElementById('filterReplaceDays'),
     filterReplaceReason: document.getElementById('filterReplaceReason'),
     filterReplaceRecommend: document.getElementById('filterReplaceRecommend'),
 };
@@ -64,6 +66,9 @@ let state = {
     filterReason: null,
     filterRecommendation: null,
     filterScore: null,
+    filterStatus: null,
+    filterStatusColor: null,
+    filterStatusEmoji: null,
     phWarning: null,
 };
 
@@ -217,249 +222,398 @@ function updateCharts(ph, tds) {
     }
 }
 
-// ==================== MQTT CONNECTION ====================
-function connectMQTT() {
+// ==================== MQTT LOGIC ====================
+function initMQTT() {
+    console.log('🔄 Connecting to MQTT...');
+    updateConnectionUI('connecting', 'Connecting...');
+    
     try {
         client = mqtt.connect(MQTT_BROKER, {
             clientId: 'ro_dash_' + Math.random().toString(16).substr(2, 8),
             reconnectPeriod: 3000,
-            keepAlive: 60
+            keepAlive: 60,
+            clean: true
         });
 
-        client.on('connect', function() {
-            console.log('✅ MQTT Connected to:', MQTT_BROKER);
+        client.on('connect', () => {
+            console.log('✅ Connected to MQTT Broker');
             state.mqttConnected = true;
-            updateConnectionStatus(true);
-            client.subscribe(MQTT_TOPIC, function(err) {
+            updateConnectionUI('connected', 'Broker Connected');
+            DOM.mqttBadge.className = 'badge active';
+            
+            client.subscribe(MQTT_TOPIC, { qos: 1 }, (err) => {
                 if (!err) {
-                    console.log('✅ Subscribed to:', MQTT_TOPIC);
+                    console.log('✅ Subscribed to topic:', MQTT_TOPIC);
+                    DOM.lastMessage.textContent = '✅ Subscribed to: ' + MQTT_TOPIC;
                 } else {
                     console.error('❌ Subscribe error:', err);
+                    DOM.lastMessage.textContent = '❌ Subscribe error: ' + err.message;
                 }
             });
         });
 
-        client.on('offline', function() {
+        client.on('message', (topic, message) => {
+            console.log('📥 Raw message received on topic:', topic);
+            
+            if (topic === MQTT_TOPIC) {
+                handleIncomingData(message.toString());
+            }
+        });
+
+        client.on('error', (error) => {
+            console.error('❌ MQTT Error:', error);
+            state.mqttConnected = false;
+            updateConnectionUI('disconnected', 'Connection Error');
+            DOM.mqttBadge.className = 'badge inactive';
+            DOM.espBadge.className = 'badge inactive';
+            DOM.lastMessage.textContent = '❌ MQTT Error: ' + error.message;
+        });
+
+        client.on('offline', () => {
             console.log('⚠️ MQTT Offline');
             state.mqttConnected = false;
-            updateConnectionStatus(false);
+            state.espOnline = false;
+            updateConnectionUI('disconnected', 'Offline');
+            DOM.mqttBadge.className = 'badge inactive';
+            DOM.espBadge.className = 'badge inactive';
+            DOM.lastMessage.textContent = '⚠️ MQTT Offline - Reconnecting...';
         });
 
-        client.on('error', function(err) {
-            console.error('❌ MQTT Error:', err);
-            state.mqttConnected = false;
-            updateConnectionStatus(false);
-        });
-
-        client.on('message', function(topic, message) {
-            try {
-                const payload = message.toString();
-                const data = JSON.parse(payload);
-                console.log('📥 Data received:', data);
-                processData(data);
-            } catch (e) {
-                console.error('❌ Parse error:', e);
-            }
+        client.on('reconnect', () => {
+            console.log('🔄 MQTT Reconnecting...');
+            DOM.lastMessage.textContent = '🔄 MQTT Reconnecting...';
         });
 
     } catch (e) {
         console.error('❌ Connection error:', e);
-        setTimeout(connectMQTT, 5000);
+        DOM.lastMessage.textContent = '❌ Connection error: ' + e.message;
+        setTimeout(initMQTT, 5000);
     }
 }
 
-// ==================== CONNECTION STATUS ====================
-function updateConnectionStatus(isConnected) {
-    state.connected = isConnected;
+function handleIncomingData(payload) {
+    console.log('📥 Processing payload...');
     
-    if (isConnected) {
-        DOM.connText.textContent = 'SYSTEM ONLINE';
-        DOM.connText.className = 'text-sm font-bold text-[#00F0FF] tracking-widest';
-        DOM.connDot.className = 'status-dot online';
-        DOM.connContainer.className = 'flex items-center gap-3 px-4 py-2 rounded-xl bg-[#00F0FF]/10 border border-[#00F0FF]/30';
-        updateBadge(DOM.mqttBadge, true, 'MQTT LINKED', '#00FF66');
-    } else {
-        DOM.connText.textContent = 'CONNECTION LOST';
-        DOM.connText.className = 'text-sm font-bold text-[#FF2A54] tracking-widest';
-        DOM.connDot.className = 'status-dot offline';
-        DOM.connContainer.className = 'flex items-center gap-3 px-4 py-2 rounded-xl bg-[#FF2A54]/10 border border-[#FF2A54]/30';
-        updateBadge(DOM.mqttBadge, false, 'MQTT OFFLINE', '#FF2A54');
-        updateBadge(DOM.espBadge, false, 'NODE OFFLINE', '#FF2A54');
-    }
-}
-
-function updateBadge(element, isGood, text, color) {
-    const dot = element.querySelector('.status-dot');
-    const span = element.querySelector('span:last-child');
-    span.textContent = text;
-    if (isGood) {
-        element.style.borderColor = 'rgba(0, 255, 102, 0.3)';
-        element.style.backgroundColor = 'rgba(0, 255, 102, 0.1)';
-        dot.className = 'status-dot online';
-        dot.style.width = '8px';
-        dot.style.height = '8px';
-        span.style.color = '#00FF66';
-    } else {
-        element.style.borderColor = 'rgba(255, 42, 84, 0.3)';
-        element.style.backgroundColor = 'rgba(0,0,0,0.4)';
-        dot.className = 'status-dot offline';
-        dot.style.width = '8px';
-        dot.style.height = '8px';
-        span.style.color = color || '#FF2A54';
-    }
-}
-
-// ==================== DATA PROCESSING ====================
-function processData(data) {
-    // Update state
-    state.lastData = data;
-    state.lastUpdateTime = new Date();
-    state.messageCount++;
-    state.espOnline = true;
-
-    // Update counters
-    DOM.dataCount.textContent = state.messageCount + ' packets rx';
-    DOM.lastUpdate.textContent = state.lastUpdateTime.toLocaleTimeString('en-US', { hour12: false });
-    DOM.lastMessage.textContent = 'Last signal: ' + state.lastUpdateTime.getSeconds() + 's ago';
-
-    // ESP is online
-    updateBadge(DOM.espBadge, true, 'NODE ACTIVE', '#00FF66');
-
-    // ========== SENSOR VALUES ==========
-    // pH
-    if (data.ph !== undefined) {
-        state.ph = data.ph;
-        DOM.phValue.textContent = data.ph.toFixed(2);
-        setBadge(DOM.phBadge, data.ph >= 6.5 && data.ph <= 8.5, 'OPTIMAL', 'WARNING');
-    }
-
-    // TDS
-    if (data.tds !== undefined) {
-        state.tds = data.tds;
-        DOM.tdsValue.textContent = data.tds.toFixed(0);
-        setBadge(DOM.tdsBadge, data.tds < 50, 'PURE', 'HIGH TDS');
-    }
-
-    // Turbidity
-    if (data.turbidity_ntu !== undefined) {
-        state.turbidity = data.turbidity_ntu;
-        DOM.turbidityValue.textContent = data.turbidity_ntu.toFixed(1);
-        setBadge(DOM.turbBadge, data.turbidity_ntu < 5, 'CLEAR', 'CLOUDY');
-    }
-
-    // Temperature
-    if (data.temperature !== undefined) {
-        state.temperature = data.temperature;
-        DOM.tempValue.textContent = data.temperature.toFixed(1);
-        setBadge(DOM.tempBadge, data.temperature >= 15 && data.temperature <= 35, 'NOMINAL', 'ALERT');
-    }
-
-    // ========== WATER STATUS ==========
-    if (data.status) {
-        state.status = data.status;
-        const status = data.status.toUpperCase();
-        if (status === 'LAYAK' || status === 'SAFE') {
-            DOM.waterStatusText.textContent = 'SAFE TO DRINK';
-            DOM.waterStatusText.className = 'text-3xl font-extrabold tracking-tight z-10 text-[#00FF66] mb-1 text-shadow-sm';
-            DOM.statusIconWrapper.innerHTML = '✅';
-            DOM.statusDetail.textContent = 'Semua parameter dalam batas normal';
-        } else if (status === 'CUKUP') {
-            DOM.waterStatusText.textContent = 'CAUTION';
-            DOM.waterStatusText.className = 'text-3xl font-extrabold tracking-tight z-10 text-[#FFD700] mb-1';
-            DOM.statusIconWrapper.innerHTML = '⚠️';
-            DOM.statusDetail.textContent = 'Beberapa parameter mendekati batas';
-        } else {
-            DOM.waterStatusText.textContent = 'NOT SAFE';
-            DOM.waterStatusText.className = 'text-3xl font-extrabold tracking-tight z-10 text-[#FF2A54] mb-1 animate-pulse';
-            DOM.statusIconWrapper.innerHTML = '❌';
-            DOM.statusDetail.textContent = 'Air tidak layak konsumsi!';
-        }
-    }
-
-    // ========== FILTER HEALTH ==========
-    if (data.health !== undefined) {
-        state.health = data.health;
-        state.filterScore = data.health;
-        DOM.filterHealth.textContent = data.health.toFixed(0);
-        DOM.healthBar.style.width = data.health + '%';
+    try {
+        const data = JSON.parse(payload);
+        console.log('✅ JSON parsed successfully:', data);
         
-        if (data.health < 50) {
-            DOM.healthBar.style.background = 'linear-gradient(90deg, #FF2A54, #FFD700)';
-        } else if (data.health < 70) {
+        // Update State
+        state.messageCount++;
+        state.lastUpdateTime = new Date();
+        state.espOnline = true;
+        state.lastData = data;
+        
+        // Populate state values
+        state.ph = data.ph !== undefined ? data.ph : null;
+        state.tds = data.tds !== undefined ? data.tds : null;
+        state.turbidity = data.turbidity_ntu !== undefined ? data.turbidity_ntu : null;
+        state.temperature = data.temperature !== undefined ? data.temperature : null;
+        state.status = data.status || "UNKNOWN";
+        state.health = data.health !== undefined ? data.health : null;
+        state.daysLeft = data.days_left !== undefined ? data.days_left : null;
+        state.volume = data.volume !== undefined ? data.volume : null;
+        state.flowRate = data.flow_rate !== undefined ? data.flow_rate : null;
+        state.filterNeedReplacement = data.filter_need_replacement !== undefined ? data.filter_need_replacement : false;
+        state.filterReason = data.filter_reason || "No data";
+        state.filterRecommendation = data.filter_recommendation || "No data";
+        state.filterScore = data.filter_score !== undefined ? data.filter_score : null;
+        state.filterStatus = data.filter_status || "NORMAL";
+        state.filterStatusColor = data.filter_status_color || "GREEN";
+        state.filterStatusEmoji = data.filter_status_emoji || "🟢";
+        state.phWarning = data.ph_warning !== undefined ? data.ph_warning : false;
+
+        console.log('📊 Updated state:', state);
+        updateUI();
+        
+    } catch (e) {
+        console.error('❌ Failed to parse JSON:', e);
+        console.error('📄 Payload was:', payload);
+        DOM.lastMessage.textContent = '❌ Parse error: ' + e.message + '\nPayload: ' + payload.substring(0, 100) + '...';
+    }
+}
+
+function updateConnectionUI(status, text) {
+    DOM.connText.textContent = text;
+    DOM.connDot.className = `dot ${status === 'connected' ? 'connected' : status === 'connecting' ? 'connecting' : 'disconnected'}`;
+}
+
+// ==================== UI UPDATES ====================
+function updateUI() {
+    console.log('🔄 Updating UI...');
+    
+    // 1. Connection Header
+    DOM.espBadge.className = 'badge active';
+    DOM.dataCount.textContent = state.messageCount;
+    if (state.lastUpdateTime) {
+        DOM.lastUpdate.textContent = state.lastUpdateTime.toLocaleTimeString();
+    }
+    
+    // 2. Raw Debug JSON
+    if (state.lastData) {
+        DOM.lastMessage.textContent = JSON.stringify(state.lastData, null, 2);
+    }
+    
+    // 3. Overall Status
+    const status = state.status || "MENUNGGU";
+    DOM.waterStatusText.textContent = status;
+    
+    let iconClass = 'fa-check';
+    let wrapperClass = 'status-icon-wrapper good';
+    let detailText = "Water is safe for consumption.";
+    let textClass = 'good-text';
+    
+    if (status === "TIDAK LAYAK" || status === "BAHAYA") {
+        iconClass = 'fa-triangle-exclamation';
+        wrapperClass = 'status-icon-wrapper bad';
+        detailText = "Water quality is unsafe. Do not consume.";
+        textClass = 'bad-text';
+    } else if (status === "PERINGATAN" || status === "KURANG LAYAK" || status === "CUKUP") {
+        iconClass = 'fa-circle-exclamation';
+        wrapperClass = 'status-icon-wrapper warning';
+        detailText = "Parameters are borderline. Proceed with caution.";
+        textClass = 'warning-text';
+    } else if (status === "LAYAK" || status === "SAFE") {
+        iconClass = 'fa-check';
+        wrapperClass = 'status-icon-wrapper good';
+        detailText = "Water is safe for consumption.";
+        textClass = 'good-text';
+    }
+    
+    DOM.statusIconWrapper.className = wrapperClass;
+    DOM.statusIconWrapper.innerHTML = `<i class="fa-solid ${iconClass}"></i>`;
+    DOM.statusDetail.textContent = detailText;
+    DOM.waterStatusText.className = textClass;
+    
+    // 4. Sensors
+    if (state.ph !== null) {
+        DOM.phValue.textContent = state.ph.toFixed(2);
+        updateParamBadge(DOM.phBadge, state.ph, 6.5, 8.5, "OPTIMAL", "WARNING", "DANGER");
+    }
+    
+    if (state.tds !== null) {
+        DOM.tdsValue.textContent = Math.round(state.tds);
+        updateParamBadge(DOM.tdsBadge, state.tds, 0, 50, "PURE", "HIGH TDS", "VERY HIGH", true);
+    }
+    
+    if (state.turbidity !== null) {
+        DOM.turbidityValue.textContent = state.turbidity.toFixed(2);
+        updateParamBadge(DOM.turbBadge, state.turbidity, 0, 5, "CLEAR", "CLOUDY", "DIRTY", true);
+    }
+    
+    if (state.temperature !== null) {
+        DOM.tempValue.textContent = state.temperature.toFixed(1);
+        updateParamBadge(DOM.tempBadge, state.temperature, 15, 35, "NOMINAL", "WARNING", "ALERT");
+    }
+    
+    // 5. Filter Health & Stats
+    if (state.health !== null) {
+        const health = state.health;
+        DOM.filterHealth.textContent = `${Math.round(health)}%`;
+        DOM.healthBar.style.width = `${Math.min(health, 100)}%`;
+        
+        if (health > 70) {
+            DOM.healthBar.style.background = 'linear-gradient(90deg, #00F0FF, #00FF66)';
+        } else if (health > 40) {
             DOM.healthBar.style.background = 'linear-gradient(90deg, #FFD700, #00FF66)';
         } else {
-            DOM.healthBar.style.background = 'linear-gradient(90deg, #00F0FF, #00FF66)';
+            DOM.healthBar.style.background = 'linear-gradient(90deg, #FF2A54, #FFD700)';
         }
     }
-
-    if (data.days_left !== undefined) {
-        state.daysLeft = data.days_left;
-        DOM.daysLeft.textContent = data.days_left + ' Days';
+    
+    if (state.daysLeft !== null) {
+        DOM.daysLeft.textContent = `${state.daysLeft} Days`;
     }
-
-    if (data.volume !== undefined) {
-        state.volume = data.volume;
-        DOM.volumeTotal.textContent = data.volume.toFixed(1) + ' L';
+    
+    if (state.volume !== null) {
+        DOM.volumeTotal.textContent = `${state.volume.toFixed(2)} L`;
     }
-
-    // ========== FILTER REPLACEMENT ==========
-    if (data.filter_need_replacement !== undefined) {
-        state.filterNeedReplacement = data.filter_need_replacement;
-        state.filterReason = data.filter_reason || 'Normal';
-        state.filterRecommendation = data.filter_recommendation || 'Lanjutkan pemantauan';
-        
-        if (data.filter_need_replacement === true) {
-            DOM.filterReplaceStatus.textContent = '⚠️ SEGERA GANTI FILTER';
-            DOM.filterReplaceStatus.className = 'text-sm font-bold text-[#FF2A54] tracking-wider animate-pulse';
-        } else if (data.filter_score < 60) {
-            DOM.filterReplaceStatus.textContent = '🔄 Persiapan Ganti';
-            DOM.filterReplaceStatus.className = 'text-sm font-bold text-[#FFD700] tracking-wider';
-        } else {
-            DOM.filterReplaceStatus.textContent = '✅ Filter OK';
-            DOM.filterReplaceStatus.className = 'text-sm font-bold text-[#00FF66] tracking-wider';
-        }
-        
-        DOM.filterReplaceScore.textContent = (data.filter_score || 0).toFixed(0) + '%';
-        DOM.filterReplaceReason.textContent = data.filter_reason || 'Normal';
-        DOM.filterReplaceRecommend.textContent = data.filter_recommendation || 'Lanjutkan pemantauan';
-    }
-
-    // ========== UPDATE CHARTS ==========
+    
+    // 6. FILTER REPLACEMENT - DENGAN STATUS NORMAL / CEK / GANTI
+    updateFilterReplacement({
+        needReplacement: state.filterNeedReplacement,
+        filterHealth: state.health,
+        filterScore: state.filterScore,
+        filterReason: state.filterReason,
+        filterRecommendation: state.filterRecommendation,
+        daysLeft: state.daysLeft,
+        filterStatus: state.filterStatus,
+        filterStatusColor: state.filterStatusColor,
+        filterStatusEmoji: state.filterStatusEmoji
+    });
+    
+    // 7. Update Charts
     updateCharts(state.ph, state.tds);
 }
 
-// ==================== BADGE HELPER ====================
-function setBadge(element, isGood, textGood, textBad) {
-    if (isGood) {
-        element.textContent = textGood;
-        element.className = 'inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-[#00FF66]/15 text-[#00FF66] border border-[#00FF66]/30 uppercase tracking-wider';
-    } else {
-        element.textContent = textBad;
-        element.className = 'inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-[#FF2A54]/15 text-[#FF2A54] border border-[#FF2A54]/30 uppercase tracking-wider animate-pulse';
+// ==================== FILTER REPLACEMENT - UPDATE ====================
+function updateFilterReplacement(data) {
+    if (!data) return;
+    
+    const needReplace = data.needReplacement || false;
+    const filterScore = data.filterHealth || data.filterScore || 0;
+    const filterReason = data.filterReason || "Normal";
+    const filterRecommend = data.filterRecommendation || "Lanjutkan pemantauan";
+    const daysLeft = data.daysLeft || 0;
+    
+    // Gunakan status dari ESP32 jika ada, atau hitung ulang
+    let statusText = data.filterStatus || '';
+    let statusColor = data.filterStatusColor || '';
+    let statusEmoji = data.filterStatusEmoji || '';
+    
+    // Jika tidak ada status dari ESP32, hitung berdasarkan skor
+    if (!statusText) {
+        if (needReplace || filterScore < 40) {
+            statusText = 'GANTI';
+            statusColor = 'RED';
+            statusEmoji = '🔴';
+        } else if (filterScore < 70) {
+            statusText = 'CEK';
+            statusColor = 'YELLOW';
+            statusEmoji = '🟡';
+        } else {
+            statusText = 'NORMAL';
+            statusColor = 'GREEN';
+            statusEmoji = '🟢';
+        }
+    }
+    
+    // DOM Elements
+    const statusElement = document.getElementById('filterReplaceStatus');
+    const scoreElement = document.getElementById('filterReplaceScore');
+    const daysElement = document.getElementById('filterReplaceDays');
+    const reasonElement = document.getElementById('filterReplaceReason');
+    const recommendElement = document.getElementById('filterReplaceRecommend');
+    
+    // Map color to CSS class
+    let ledClass = '';
+    let textClass = '';
+    
+    switch(statusColor.toUpperCase()) {
+        case 'GREEN':
+            ledClass = 'led-green';
+            textClass = 'text-filter-normal';
+            break;
+        case 'YELLOW':
+            ledClass = 'led-yellow';
+            textClass = 'text-filter-check';
+            break;
+        case 'RED':
+            ledClass = 'led-red';
+            textClass = 'text-filter-replace';
+            break;
+        default:
+            ledClass = 'led-green';
+            textClass = 'text-filter-normal';
+    }
+    
+    // ========== UPDATE UI ==========
+    if (statusElement) {
+        statusElement.innerHTML = `
+            <span class="status-led ${ledClass}"></span>
+            <span class="${textClass}">${statusEmoji} ${statusText}</span>
+            <span class="text-xs text-white/40 ml-1">(${filterScore.toFixed(0)}%)</span>
+        `;
+    }
+    
+    if (scoreElement) {
+        scoreElement.textContent = filterScore.toFixed(0) + '%';
+        if (filterScore < 40) {
+            scoreElement.className = 'text-sm font-mono text-[#FF2A54] font-bold';
+        } else if (filterScore < 70) {
+            scoreElement.className = 'text-sm font-mono text-[#FFD700] font-bold';
+        } else {
+            scoreElement.className = 'text-sm font-mono text-[#00FF66] font-bold';
+        }
+    }
+    
+    if (daysElement) {
+        if (daysLeft > 0) {
+            daysElement.textContent = daysLeft + ' hari';
+            daysElement.className = 'text-sm font-mono text-white';
+        } else {
+            daysElement.textContent = '⚠️ Segera!';
+            daysElement.className = 'text-sm font-mono text-[#FF2A54] font-bold';
+        }
+    }
+    
+    if (reasonElement) {
+        reasonElement.textContent = filterReason;
+    }
+    
+    if (recommendElement) {
+        recommendElement.textContent = filterRecommend;
     }
 }
 
-// ==================== AUTO-RECONNECT HEARTBEAT ====================
-setInterval(function() {
-    if (!state.mqttConnected && window.mqttClient) {
-        console.log('🔄 Reconnecting...');
-        window.mqttClient.reconnect();
+// ==================== BADGE HELPER ====================
+function updateParamBadge(element, value, minSafe, maxSafe, safeLabel, warnLabel, dangerLabel, isLowerBetter = false) {
+    if (value === null || value === undefined) {
+        element.textContent = '--';
+        element.className = 'inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-white/5 text-white/40 border border-white/10 uppercase tracking-wider';
+        return;
+    }
+    
+    if (isLowerBetter) {
+        if (value <= maxSafe) {
+            element.textContent = safeLabel;
+            element.className = 'inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-[#00FF66]/15 text-[#00FF66] border border-[#00FF66]/30 uppercase tracking-wider';
+        } else if (value <= maxSafe * 2) {
+            element.textContent = warnLabel;
+            element.className = 'inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-[#FFD700]/15 text-[#FFD700] border border-[#FFD700]/30 uppercase tracking-wider';
+        } else {
+            element.textContent = dangerLabel;
+            element.className = 'inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-[#FF2A54]/15 text-[#FF2A54] border border-[#FF2A54]/30 uppercase tracking-wider animate-pulse';
+        }
+    } else {
+        if (value >= minSafe && value <= maxSafe) {
+            element.textContent = safeLabel;
+            element.className = 'inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-[#00FF66]/15 text-[#00FF66] border border-[#00FF66]/30 uppercase tracking-wider';
+        } else if (value < minSafe - 1 || value > maxSafe + 1) {
+            element.textContent = dangerLabel;
+            element.className = 'inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-[#FF2A54]/15 text-[#FF2A54] border border-[#FF2A54]/30 uppercase tracking-wider animate-pulse';
+        } else {
+            element.textContent = warnLabel;
+            element.className = 'inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-[#FFD700]/15 text-[#FFD700] border border-[#FFD700]/30 uppercase tracking-wider';
+        }
+    }
+}
+
+// ==================== AUTO-RECONNECT ====================
+setInterval(() => {
+    if (state.lastUpdateTime) {
+        const now = new Date();
+        const diff = (now - state.lastUpdateTime) / 1000;
+        if (diff > 15 && state.espOnline) {
+            state.espOnline = false;
+            DOM.espBadge.className = 'badge inactive';
+        }
+    }
+}, 5000);
+
+setInterval(() => {
+    if (!state.mqttConnected && client) {
+        console.log('🔄 Auto-reconnect triggered...');
+        client.reconnect();
     }
 }, 30000);
 
-// ==================== INIT ====================
-document.addEventListener('DOMContentLoaded', function() {
+// ==================== INITIALIZE ====================
+document.addEventListener('DOMContentLoaded', () => {
     console.log('🚀 Smart RO Monitor Initialized');
     console.log('📡 MQTT Broker:', MQTT_BROKER);
     console.log('📋 Topic:', MQTT_TOPIC);
     initCharts();
-    connectMQTT();
+    initMQTT();
 });
 
 // ==================== EXPOSE FOR DEBUG ====================
 window.debug = {
     state: state,
     DOM: DOM,
-    charts: charts,
-    client: client
+    client: client,
+    MQTT_CONFIG: { broker: MQTT_BROKER, topic: MQTT_TOPIC }
 };
+
+console.log('🔧 Debug: Type "debug" in console to see state');
+console.log('🔧 Debug: Type "debug.state" to see current data');
