@@ -9,40 +9,12 @@
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     
     <!-- Chart.js & MQTT.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mqtt@5.0.0/dist/mqtt.min.js"></script>
-
-    <!-- Tailwind Config -->
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    fontFamily: {
-                        sans: ['Outfit', 'sans-serif'],
-                        mono: ['JetBrains Mono', 'monospace'],
-                    },
-                    colors: {
-                        ocean: {
-                            900: '#061325',
-                            800: '#0A203F',
-                            700: '#0F305E',
-                            600: '#164585',
-                            accent: '#00F0FF',
-                            accentSoft: 'rgba(0, 240, 255, 0.2)',
-                            danger: '#FF2A54',
-                            warning: '#FFD700',
-                            success: '#00FF66'
-                        }
-                    }
-                }
-            }
-        }
-    </script>
 
     <!-- Custom CSS -->
     <link rel="stylesheet" href="style.css">
@@ -150,20 +122,29 @@
                     </div>
                 </div>
 
-                <!-- FILTER REPLACEMENT CARD -->
+                <!-- FILTER REPLACEMENT CARD - DENGAN STATUS NORMAL / CEK / GANTI -->
                 <div class="glass-panel p-5" id="filter-replacement-card">
-                    <h3 class="text-xs font-bold text-[#00F0FF] uppercase tracking-[0.2em] mb-3">🔧 Filter Replacement Status</h3>
+                    <h3 class="text-xs font-bold text-[#00F0FF] uppercase tracking-[0.2em] mb-3">
+                        <i class="fas fa-filter"></i> Filter Status
+                    </h3>
                     <div class="grid grid-cols-2 gap-3">
-                        <div>
-                            <div class="text-[10px] text-white/40 uppercase">Status</div>
-                            <div id="filterReplaceStatus" class="text-sm font-bold text-[#00FF66]">--</div>
+                        <div class="col-span-2">
+                            <div class="text-[10px] text-white/40 uppercase">Status Filter</div>
+                            <div id="filterReplaceStatus" class="text-sm font-bold text-[#00FF66] flex items-center gap-2">
+                                <span class="status-led led-green"></span>
+                                NORMAL
+                            </div>
                         </div>
                         <div>
                             <div class="text-[10px] text-white/40 uppercase">Skor</div>
                             <div id="filterReplaceScore" class="text-sm font-mono text-white">--</div>
                         </div>
+                        <div>
+                            <div class="text-[10px] text-white/40 uppercase">Sisa Hari</div>
+                            <div id="filterReplaceDays" class="text-sm font-mono text-white">--</div>
+                        </div>
                         <div class="col-span-2">
-                            <div class="text-[10px] text-white/40 uppercase">Alasan</div>
+                            <div class="text-[10px] text-white/40 uppercase">Keterangan</div>
                             <div id="filterReplaceReason" class="text-xs text-white/60">--</div>
                         </div>
                         <div class="col-span-2">
