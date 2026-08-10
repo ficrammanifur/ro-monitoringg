@@ -80,25 +80,25 @@
 ### Tampilan Serial Monitor
 ```
 ╔═══════════════════════════════════════╗
-║ SYSTEM STATUS                        ║
+║ SYSTEM STATUS                         ║
 ╠═══════════════════════════════════════╣
-║ pH          :   7.12                ║
-║ TDS         :    45 ppm           ║
-║ Temperature :   26.50 °C            ║
-║ Turbidity   :    2.34 NTU (JERNIH) ║
+║ pH          :   7.12                  ║
+║ TDS         :    45 ppm               ║
+║ Temperature :   26.50 °C              ║
+║ Turbidity   :    2.34 NTU (JERNIH)    ║ 
 ╠═══════════════════════════════════════╣
-║ Volume      :   125.500 L            ║
-║ Flow Rate   :     2.50 L/min        ║
+║ Volume      :   125.500 L             ║
+║ Flow Rate   :     2.50 L/min          ║
 ╠═══════════════════════════════════════╣
-║ Status      : LAYAK                  ║
-║ Filter      :     85 %             ║
-║ Days Left   :     22                ║
+║ Status      : LAYAK                   ║
+║ Filter      :     85 %                ║
+║ Days Left   :     22                  ║
 ╠═══════════════════════════════════════╣
-║ FILTER REPLACEMENT STATUS           ║
+║ FILTER REPLACEMENT STATUS             ║
 ╠═══════════════════════════════════════╣
-║ Need Replace: TIDAK 🟢              ║
-║ Reason      : Skor filter: 85%      ║
-║ Recomendasi : Filter masih baik     ║
+║ Need Replace: TIDAK 🟢               ║
+║ Reason      : Skor filter: 85%        ║
+║ Recomendasi : Filter masih baik       ║
 ╚═══════════════════════════════════════╝
 ```
 
@@ -172,7 +172,7 @@ ESP32 DevKit
             │          ESP32 (Arduino Loop)              │
             │────────────────────────────────────────────│
             │ - millis() Timing                          │
-            │ - Sensor Read (pH, TDS, Turb, Temp, Flow) │
+            │ - Sensor Read (pH, TDS, Turb, Temp, Flow)  │
             │ - Filter Health Calculation                │
             │ - MQTT Publish                             │
             │ - LCD Update                               │
@@ -182,21 +182,21 @@ ESP32 DevKit
          │             │                                 │
          ▼             ▼                                 ▼
 ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────────┐
-│  LCD 20x4 I2C   │ │  Buzzer (GPIO2) │ │  Flow Sensor (GPIO19)│
+│  LCD 20x4 I2C   │ │  Buzzer (GPIO2) │ │ Flow Sensor (GPIO19)│
 │  (SDA=21,SCL=22)│ └─────────────────┘ │  (Interrupt)        │
-└─────────────────┘                      └─────────────────────┘
+└─────────────────┘                     └─────────────────────┘
          │
          ▼
-┌─────────────────────────────────────────────────────────────┐
-│                         SENSORS                             │
+┌────────────────────────────────────────────────────────────┐
+│                         SENSORS                            │
 │  ┌──────────────┐ ┌──────────────┐ ┌────────────────────┐  │
 │  │ pH (GPIO32)  │ │ TDS (GPIO33) │ │ Turbidity (GPIO35) │  │
 │  │ ADC 12-bit   │ │ ADC 12-bit   │ │ ADC 12-bit         │  │
 │  └──────────────┘ └──────────────┘ └────────────────────┘  │
-│  ┌─────────────────────────────────────────────────────┐    │
+│  ┌────────────────────────────────────────────────────┐    │
 │  │ DS18B20 (GPIO18) - 1-Wire Temperature              │    │
-│  └─────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────┘
+│  └────────────────────────────────────────────────────┘    │
+└────────────────────────────────────────────────────────────┘
 ```
 
 ### Flowchart Sistem
