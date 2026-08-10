@@ -1,22 +1,20 @@
 /**
  * ============================================================
  * SMART RO WATER QUALITY MONITOR - MQTT Web Client
- * Fully Synchronized with ESP32 .ino
+ * FULLY SYNCHRONIZED WITH ESP32 .ino
+ * DENGAN DEBUG LOG LENGKAP
  * ============================================================
  */
 
-// ==================== MQTT CONFIGURATION ====================
-const MQTT_CONFIG = {
-    broker: "wss://broker.hivemq.com:8884/mqtt",
-    topic: "watermon/all",
-    clientId: "ro_dashboard_" + Math.random().toString(16).substr(2, 8),
-    reconnectPeriod: 3000,
-    keepAlive: 60
-};
+// ==================== CONFIG ====================
+const MQTT_BROKER = "wss://broker.hivemq.com:8884/mqtt";
+const MQTT_TOPIC = "watermon/all";
+
+let client = null;
+let messageCount = 0;
 
 // ==================== DOM REFERENCES ====================
 const DOM = {
-    // Connection Status
     connContainer: document.getElementById('connectionContainer'),
     connDot: document.getElementById('connectionDot'),
     connText: document.getElementById('connectionText'),
@@ -25,31 +23,21 @@ const DOM = {
     lastUpdate: document.getElementById('lastUpdate'),
     dataCount: document.getElementById('dataCount'),
     lastMessage: document.getElementById('lastMessage'),
-    
-    // Water Status
     waterStatusText: document.getElementById('waterStatusText'),
     statusIconWrapper: document.getElementById('statusIconWrapper'),
     statusDetail: document.getElementById('statusDetail'),
-    
-    // Filter Health
     filterHealth: document.getElementById('filterHealth'),
     healthBar: document.getElementById('healthBar'),
     daysLeft: document.getElementById('daysLeft'),
     volumeTotal: document.getElementById('volumeTotal'),
-    
-    // Sensor Values
     phValue: document.getElementById('phValue'),
     tdsValue: document.getElementById('tdsValue'),
     turbidityValue: document.getElementById('turbidityValue'),
     tempValue: document.getElementById('tempValue'),
-    
-    // Sensor Badges
     phBadge: document.getElementById('phBadge'),
     tdsBadge: document.getElementById('tdsBadge'),
     turbBadge: document.getElementById('turbBadge'),
     tempBadge: document.getElementById('tempBadge'),
-    
-    // Filter Replacement
     filterReplaceStatus: document.getElementById('filterReplaceStatus'),
     filterReplaceScore: document.getElementById('filterReplaceScore'),
     filterReplaceReason: document.getElementById('filterReplaceReason'),
@@ -81,60 +69,84 @@ let state = {
 };
 
 // ==================== MQTT LOGIC ====================
-let client = null;
-
 function initMQTT() {
+    console.log('🔄 Connecting to MQTT...');
     updateConnectionUI('connecting', 'Connecting...');
     
-    client = mqtt.connect(MQTT_CONFIG.broker, {
-        clientId: MQTT_CONFIG.clientId,
-        reconnectPeriod: MQTT_CONFIG.reconnectPeriod,
-        keepAlive: MQTT_CONFIG.keepAlive
-    });
+    try {
+        client = mqtt.connect(MQTT_BROKER, {
+            clientId: 'ro_dash_' + Math.random().toString(16).substr(2, 8),
+            reconnectPeriod: 3000,
+            keepAlive: 60,
+            clean: true
+        });
 
-    client.on('connect', () => {
-        console.log('✅ Connected to MQTT Broker');
-        state.mqttConnected = true;
-        updateConnectionUI('connected', 'Broker Connected');
-        DOM.mqttBadge.className = 'badge active';
-        
-        client.subscribe(MQTT_CONFIG.topic, (err) => {
-            if (!err) {
-                console.log('✅ Subscribed to topic:', MQTT_CONFIG.topic);
+        client.on('connect', () => {
+            console.log('✅ Connected to MQTT Broker');
+            state.mqttConnected = true;
+            updateConnectionUI('connected', 'Broker Connected');
+            DOM.mqttBadge.className = 'badge active';
+            
+            // Subscribe dengan error handling
+            client.subscribe(MQTT_TOPIC, { qos: 1 }, (err) => {
+                if (!err) {
+                    console.log('✅ Subscribed to topic:', MQTT_TOPIC);
+                    DOM.lastMessage.textContent = '✅ Subscribed to: ' + MQTT_TOPIC;
+                } else {
+                    console.error('❌ Subscribe error:', err);
+                    DOM.lastMessage.textContent = '❌ Subscribe error: ' + err.message;
+                }
+            });
+        });
+
+        client.on('message', (topic, message) => {
+            console.log('📥 Raw message received on topic:', topic);
+            console.log('📥 Payload:', message.toString());
+            
+            if (topic === MQTT_TOPIC) {
+                handleIncomingData(message.toString());
             } else {
-                console.error('❌ Subscribe error:', err);
+                console.log('⚠️ Ignoring topic:', topic);
             }
         });
-    });
 
-    client.on('message', (topic, message) => {
-        if (topic === MQTT_CONFIG.topic) {
-            handleIncomingData(message.toString());
-        }
-    });
+        client.on('error', (error) => {
+            console.error('❌ MQTT Error:', error);
+            state.mqttConnected = false;
+            updateConnectionUI('disconnected', 'Connection Error');
+            DOM.mqttBadge.className = 'badge inactive';
+            DOM.espBadge.className = 'badge inactive';
+            DOM.lastMessage.textContent = '❌ MQTT Error: ' + error.message;
+        });
 
-    client.on('error', (error) => {
-        console.error('❌ MQTT Error:', error);
-        state.mqttConnected = false;
-        updateConnectionUI('disconnected', 'Connection Error');
-        DOM.mqttBadge.className = 'badge inactive';
-        DOM.espBadge.className = 'badge inactive';
-    });
+        client.on('offline', () => {
+            console.log('⚠️ MQTT Offline');
+            state.mqttConnected = false;
+            state.espOnline = false;
+            updateConnectionUI('disconnected', 'Offline');
+            DOM.mqttBadge.className = 'badge inactive';
+            DOM.espBadge.className = 'badge inactive';
+            DOM.lastMessage.textContent = '⚠️ MQTT Offline - Reconnecting...';
+        });
 
-    client.on('offline', () => {
-        console.log('⚠️ MQTT Offline');
-        state.mqttConnected = false;
-        state.espOnline = false;
-        updateConnectionUI('disconnected', 'Offline');
-        DOM.mqttBadge.className = 'badge inactive';
-        DOM.espBadge.className = 'badge inactive';
-    });
+        client.on('reconnect', () => {
+            console.log('🔄 MQTT Reconnecting...');
+            DOM.lastMessage.textContent = '🔄 MQTT Reconnecting...';
+        });
+
+    } catch (e) {
+        console.error('❌ Connection error:', e);
+        DOM.lastMessage.textContent = '❌ Connection error: ' + e.message;
+        setTimeout(initMQTT, 5000);
+    }
 }
 
 function handleIncomingData(payload) {
+    console.log('📥 Processing payload...');
+    
     try {
         const data = JSON.parse(payload);
-        console.log('📥 Data received:', data);
+        console.log('✅ JSON parsed successfully:', data);
         
         // Update State
         state.messageCount++;
@@ -142,27 +154,29 @@ function handleIncomingData(payload) {
         state.espOnline = true;
         state.lastData = data;
         
-        // Populate state values
-        state.ph = data.ph;
-        state.tds = data.tds;
-        state.turbidity = data.turbidity_ntu;
-        state.temperature = data.temperature;
-        state.status = data.status;
-        state.health = data.health;
-        state.daysLeft = data.days_left;
-        state.volume = data.volume;
-        state.flowRate = data.flow_rate;
-        state.filterNeedReplacement = data.filter_need_replacement;
-        state.filterReason = data.filter_reason;
-        state.filterRecommendation = data.filter_recommendation;
-        state.filterScore = data.filter_score;
-        state.phWarning = data.ph_warning;
+        // Populate state values dengan validasi
+        state.ph = data.ph !== undefined ? data.ph : null;
+        state.tds = data.tds !== undefined ? data.tds : null;
+        state.turbidity = data.turbidity_ntu !== undefined ? data.turbidity_ntu : null;
+        state.temperature = data.temperature !== undefined ? data.temperature : null;
+        state.status = data.status || "UNKNOWN";
+        state.health = data.health !== undefined ? data.health : null;
+        state.daysLeft = data.days_left !== undefined ? data.days_left : null;
+        state.volume = data.volume !== undefined ? data.volume : null;
+        state.flowRate = data.flow_rate !== undefined ? data.flow_rate : null;
+        state.filterNeedReplacement = data.filter_need_replacement !== undefined ? data.filter_need_replacement : false;
+        state.filterReason = data.filter_reason || "No data";
+        state.filterRecommendation = data.filter_recommendation || "No data";
+        state.filterScore = data.filter_score !== undefined ? data.filter_score : null;
+        state.phWarning = data.ph_warning !== undefined ? data.ph_warning : false;
 
+        console.log('📊 Updated state:', state);
         updateUI();
         
     } catch (e) {
         console.error('❌ Failed to parse JSON:', e);
-        console.error('Payload:', payload);
+        console.error('📄 Payload was:', payload);
+        DOM.lastMessage.textContent = '❌ Parse error: ' + e.message + '\nPayload: ' + payload.substring(0, 100) + '...';
     }
 }
 
@@ -173,13 +187,19 @@ function updateConnectionUI(status, text) {
 
 // ==================== UI UPDATES ====================
 function updateUI() {
+    console.log('🔄 Updating UI...');
+    
     // 1. Connection Header
     DOM.espBadge.className = 'badge active';
     DOM.dataCount.textContent = state.messageCount;
-    DOM.lastUpdate.textContent = state.lastUpdateTime.toLocaleTimeString();
+    if (state.lastUpdateTime) {
+        DOM.lastUpdate.textContent = state.lastUpdateTime.toLocaleTimeString();
+    }
     
     // 2. Raw Debug JSON
-    DOM.lastMessage.textContent = JSON.stringify(state.lastData, null, 2);
+    if (state.lastData) {
+        DOM.lastMessage.textContent = JSON.stringify(state.lastData, null, 2);
+    }
     
     // 3. Overall Status
     const status = state.status || "MENUNGGU";
@@ -213,40 +233,54 @@ function updateUI() {
     DOM.waterStatusText.className = textClass;
     
     // 4. Sensors
-    DOM.phValue.textContent = typeof state.ph === 'number' ? state.ph.toFixed(2) : state.ph;
-    updateParamBadge(DOM.phBadge, state.ph, 6.5, 8.5, "Safe", "Warn", "Danger");
-    
-    DOM.tdsValue.textContent = Math.round(state.tds || 0);
-    updateParamBadge(DOM.tdsBadge, state.tds, 0, 100, "Pure", "Warn", "High", true);
-    
-    DOM.turbidityValue.textContent = typeof state.turbidity === 'number' ? state.turbidity.toFixed(2) : state.turbidity;
-    updateParamBadge(DOM.turbBadge, state.turbidity, 0, 1.0, "Clear", "Cloudy", "Dirty", true);
-    
-    DOM.tempValue.textContent = typeof state.temperature === 'number' ? state.temperature.toFixed(1) : state.temperature;
-    updateParamBadge(DOM.tempBadge, state.temperature, 15, 35, "Normal", "Warn", "Alert");
-    
-    // 5. Filter Health & Stats
-    const health = state.health || 0;
-    DOM.filterHealth.textContent = `${Math.round(health)}%`;
-    DOM.healthBar.style.width = `${Math.min(health, 100)}%`;
-    
-    // Color health bar based on value
-    if (health > 50) {
-        DOM.healthBar.style.background = 'linear-gradient(90deg, #10b981, #34d399)';
-    } else if (health > 20) {
-        DOM.healthBar.style.background = 'linear-gradient(90deg, #f59e0b, #fbbf24)';
-    } else {
-        DOM.healthBar.style.background = 'linear-gradient(90deg, #ef4444, #f87171)';
+    if (state.ph !== null) {
+        DOM.phValue.textContent = state.ph.toFixed(2);
+        updateParamBadge(DOM.phBadge, state.ph, 6.5, 8.5, "Safe", "Warn", "Danger");
     }
     
-    DOM.daysLeft.textContent = `${state.daysLeft || 0} days`;
-    DOM.volumeTotal.textContent = `${typeof state.volume === 'number' ? state.volume.toFixed(2) : state.volume || 0} L`;
+    if (state.tds !== null) {
+        DOM.tdsValue.textContent = Math.round(state.tds);
+        updateParamBadge(DOM.tdsBadge, state.tds, 0, 100, "Pure", "Warn", "High", true);
+    }
+    
+    if (state.turbidity !== null) {
+        DOM.turbidityValue.textContent = state.turbidity.toFixed(2);
+        updateParamBadge(DOM.turbBadge, state.turbidity, 0, 1.0, "Clear", "Cloudy", "Dirty", true);
+    }
+    
+    if (state.temperature !== null) {
+        DOM.tempValue.textContent = state.temperature.toFixed(1);
+        updateParamBadge(DOM.tempBadge, state.temperature, 15, 35, "Normal", "Warn", "Alert");
+    }
+    
+    // 5. Filter Health & Stats
+    if (state.health !== null) {
+        const health = state.health;
+        DOM.filterHealth.textContent = `${Math.round(health)}%`;
+        DOM.healthBar.style.width = `${Math.min(health, 100)}%`;
+        
+        if (health > 50) {
+            DOM.healthBar.style.background = 'linear-gradient(90deg, #10b981, #34d399)';
+        } else if (health > 20) {
+            DOM.healthBar.style.background = 'linear-gradient(90deg, #f59e0b, #fbbf24)';
+        } else {
+            DOM.healthBar.style.background = 'linear-gradient(90deg, #ef4444, #f87171)';
+        }
+    }
+    
+    if (state.daysLeft !== null) {
+        DOM.daysLeft.textContent = `${state.daysLeft} days`;
+    }
+    
+    if (state.volume !== null) {
+        DOM.volumeTotal.textContent = `${state.volume.toFixed(2)} L`;
+    }
     
     // 6. Maintenance Insights
     if (state.filterNeedReplacement) {
         DOM.filterReplaceStatus.textContent = "Replace Now";
         DOM.filterReplaceStatus.className = "insight-val badge-danger";
-    } else if (health <= 30) {
+    } else if (state.health !== null && state.health <= 30) {
         DOM.filterReplaceStatus.textContent = "Prepare to Replace";
         DOM.filterReplaceStatus.className = "insight-val badge-warning";
     } else {
@@ -254,9 +288,19 @@ function updateUI() {
         DOM.filterReplaceStatus.className = "insight-val badge-success";
     }
     
-    DOM.filterReplaceScore.textContent = `${Math.round(state.filterScore || 0)}/100`;
-    DOM.filterReplaceReason.textContent = state.filterReason || "No data yet.";
-    DOM.filterReplaceRecommend.textContent = state.filterRecommendation || "Please wait for data synchronization...";
+    if (state.filterScore !== null) {
+        DOM.filterReplaceScore.textContent = `${Math.round(state.filterScore)}/100`;
+    }
+    
+    if (state.filterReason) {
+        DOM.filterReplaceReason.textContent = state.filterReason;
+    }
+    
+    if (state.filterRecommendation) {
+        DOM.filterReplaceRecommend.textContent = state.filterRecommendation;
+    }
+    
+    console.log('✅ UI Update complete');
 }
 
 function updateParamBadge(element, value, minSafe, maxSafe, safeLabel, warnLabel, dangerLabel, isLowerBetter = false) {
@@ -292,7 +336,6 @@ function updateParamBadge(element, value, minSafe, maxSafe, safeLabel, warnLabel
 }
 
 // ==================== AUTO-RECONNECT ====================
-// Check ESP timeout
 setInterval(() => {
     if (state.lastUpdateTime) {
         const now = new Date();
@@ -304,10 +347,9 @@ setInterval(() => {
     }
 }, 5000);
 
-// Auto-retry MQTT
 setInterval(() => {
     if (!state.mqttConnected && client) {
-        console.log('🔄 Attempting to reconnect...');
+        console.log('🔄 Auto-reconnect triggered...');
         client.reconnect();
     }
 }, 30000);
@@ -315,8 +357,8 @@ setInterval(() => {
 // ==================== INITIALIZE ====================
 document.addEventListener('DOMContentLoaded', () => {
     console.log('🚀 Smart RO Monitor Initialized');
-    console.log('📡 MQTT Broker:', MQTT_CONFIG.broker);
-    console.log('📋 Topic:', MQTT_CONFIG.topic);
+    console.log('📡 MQTT Broker:', MQTT_BROKER);
+    console.log('📋 Topic:', MQTT_TOPIC);
     initMQTT();
 });
 
@@ -324,5 +366,9 @@ document.addEventListener('DOMContentLoaded', () => {
 window.debug = {
     state: state,
     DOM: DOM,
-    client: client
+    client: client,
+    MQTT_CONFIG: { broker: MQTT_BROKER, topic: MQTT_TOPIC }
 };
+
+console.log('🔧 Debug: Type "debug" in console to see state');
+console.log('🔧 Debug: Type "debug.state" to see current data');
