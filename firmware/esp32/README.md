@@ -1,6 +1,5 @@
 # 📄 README.md - ESP32 Firmware (FIXED)
 
-```markdown
 <h1 align="center">💧 ESP32 RO Water Quality Monitor<br>
     <sub>Smart Reverse Osmosis Monitoring System</sub>
 </h1>
