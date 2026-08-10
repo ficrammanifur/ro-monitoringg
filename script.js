@@ -3,6 +3,7 @@
  * SMART RO WATER QUALITY MONITOR - MQTT Web Client
  * FULLY SYNCHRONIZED WITH ESP32 .ino
  * WITH FILTER STATUS: NORMAL / CEK / GANTI
+ * DENGAN DEBUG LOG LENGKAP
  * ============================================================
  */
 
@@ -241,6 +242,7 @@ function initMQTT() {
             updateConnectionUI('connected', 'Broker Connected');
             DOM.mqttBadge.className = 'badge active';
             
+            // Subscribe dengan error handling
             client.subscribe(MQTT_TOPIC, { qos: 1 }, (err) => {
                 if (!err) {
                     console.log('✅ Subscribed to topic:', MQTT_TOPIC);
@@ -257,6 +259,12 @@ function initMQTT() {
             
             if (topic === MQTT_TOPIC) {
                 handleIncomingData(message.toString());
+            console.log('📥 Payload:', message.toString());
+            
+            if (topic === MQTT_TOPIC) {
+                handleIncomingData(message.toString());
+            } else {
+                console.log('⚠️ Ignoring topic:', topic);
             }
         });
 
@@ -305,6 +313,7 @@ function handleIncomingData(payload) {
         state.lastData = data;
         
         // Populate state values
+        // Populate state values dengan validasi
         state.ph = data.ph !== undefined ? data.ph : null;
         state.tds = data.tds !== undefined ? data.tds : null;
         state.turbidity = data.turbidity_ntu !== undefined ? data.turbidity_ntu : null;
@@ -389,21 +398,25 @@ function updateUI() {
     if (state.ph !== null) {
         DOM.phValue.textContent = state.ph.toFixed(2);
         updateParamBadge(DOM.phBadge, state.ph, 6.5, 8.5, "OPTIMAL", "WARNING", "DANGER");
+        updateParamBadge(DOM.phBadge, state.ph, 6.5, 8.5, "Safe", "Warn", "Danger");
     }
     
     if (state.tds !== null) {
         DOM.tdsValue.textContent = Math.round(state.tds);
         updateParamBadge(DOM.tdsBadge, state.tds, 0, 50, "PURE", "HIGH TDS", "VERY HIGH", true);
+        updateParamBadge(DOM.tdsBadge, state.tds, 0, 100, "Pure", "Warn", "High", true);
     }
     
     if (state.turbidity !== null) {
         DOM.turbidityValue.textContent = state.turbidity.toFixed(2);
         updateParamBadge(DOM.turbBadge, state.turbidity, 0, 5, "CLEAR", "CLOUDY", "DIRTY", true);
+        updateParamBadge(DOM.turbBadge, state.turbidity, 0, 1.0, "Clear", "Cloudy", "Dirty", true);
     }
     
     if (state.temperature !== null) {
         DOM.tempValue.textContent = state.temperature.toFixed(1);
         updateParamBadge(DOM.tempBadge, state.temperature, 15, 35, "NOMINAL", "WARNING", "ALERT");
+        updateParamBadge(DOM.tempBadge, state.temperature, 15, 35, "Normal", "Warn", "Alert");
     }
     
     // 5. Filter Health & Stats
@@ -418,11 +431,18 @@ function updateUI() {
             DOM.healthBar.style.background = 'linear-gradient(90deg, #FFD700, #00FF66)';
         } else {
             DOM.healthBar.style.background = 'linear-gradient(90deg, #FF2A54, #FFD700)';
+        if (health > 50) {
+            DOM.healthBar.style.background = 'linear-gradient(90deg, #10b981, #34d399)';
+        } else if (health > 20) {
+            DOM.healthBar.style.background = 'linear-gradient(90deg, #f59e0b, #fbbf24)';
+        } else {
+            DOM.healthBar.style.background = 'linear-gradient(90deg, #ef4444, #f87171)';
         }
     }
     
     if (state.daysLeft !== null) {
         DOM.daysLeft.textContent = `${state.daysLeft} Days`;
+        DOM.daysLeft.textContent = `${state.daysLeft} days`;
     }
     
     if (state.volume !== null) {
@@ -575,9 +595,76 @@ function updateParamBadge(element, value, minSafe, maxSafe, safeLabel, warnLabel
         } else {
             element.textContent = warnLabel;
             element.className = 'inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-[#FFD700]/15 text-[#FFD700] border border-[#FFD700]/30 uppercase tracking-wider';
+    // 6. Maintenance Insights
+    if (state.filterNeedReplacement) {
+        DOM.filterReplaceStatus.textContent = "Replace Now";
+        DOM.filterReplaceStatus.className = "insight-val badge-danger";
+    } else if (state.health !== null && state.health <= 30) {
+        DOM.filterReplaceStatus.textContent = "Prepare to Replace";
+        DOM.filterReplaceStatus.className = "insight-val badge-warning";
+    } else {
+        DOM.filterReplaceStatus.textContent = "Good Condition";
+        DOM.filterReplaceStatus.className = "insight-val badge-success";
+    }
+    
+    if (state.filterScore !== null) {
+        DOM.filterReplaceScore.textContent = `${Math.round(state.filterScore)}/100`;
+    }
+    
+    if (state.filterReason) {
+        DOM.filterReplaceReason.textContent = state.filterReason;
+    }
+    
+    if (state.filterRecommendation) {
+        DOM.filterReplaceRecommend.textContent = state.filterRecommendation;
+    }
+    
+    console.log('✅ UI Update complete');
+}
+
+function updateParamBadge(element, value, minSafe, maxSafe, safeLabel, warnLabel, dangerLabel, isLowerBetter = false) {
+    if (value === null || value === undefined) {
+        element.textContent = '--';
+        element.className = 'param-badge neutral';
+        return;
+    }
+    
+    if (isLowerBetter) {
+        if (value <= maxSafe) {
+            element.textContent = safeLabel;
+            element.className = 'param-badge safe';
+        } else if (value <= maxSafe * 2) {
+            element.textContent = warnLabel;
+            element.className = 'param-badge warn';
+        } else {
+            element.textContent = dangerLabel;
+            element.className = 'param-badge danger';
+        }
+    } else {
+        if (value >= minSafe && value <= maxSafe) {
+            element.textContent = safeLabel;
+            element.className = 'param-badge safe';
+        } else if (value < minSafe - 1 || value > maxSafe + 1) {
+            element.textContent = dangerLabel;
+            element.className = 'param-badge danger';
+        } else {
+            element.textContent = warnLabel;
+            element.className = 'param-badge warn';
         }
     }
 }
+
+// ==================== AUTO-RECONNECT ====================
+setInterval(() => {
+    if (state.lastUpdateTime) {
+        const now = new Date();
+        const diff = (now - state.lastUpdateTime) / 1000;
+        if (diff > 15 && state.espOnline) {
+            state.espOnline = false;
+            DOM.espBadge.className = 'badge inactive';
+        }
+    }
+}, 5000);
 
 // ==================== AUTO-RECONNECT ====================
 setInterval(() => {

@@ -1,11 +1,9 @@
 /*
  * ============================================================
- * SMART WATER QUALITY MONITORING SYSTEM
- * For Reverse Osmosis Depot
- * ESP32 - WITHOUT PUMP CONTROL
- * LCD: Minimalist Display
+ * SMART RO WATER QUALITY MONITOR - PUBLISH FIX VERSION
  * ============================================================
  */
+
 #include <Arduino.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
@@ -89,9 +87,8 @@ const float V7 = 0.874; const float PH7 = 6.86;
 const float V9 = 0.485; const float PH9 = 9.18;
 
 // ==================== TURBIDITY CALIBRATION ====================
-// HASIL KALIBRASI DARI TESTING ANDA
-const int ADC_AIR = 1946;     // Nilai di air jernih
-const int ADC_UDARA = 1705;   // Nilai di udara
+const int ADC_AIR = 1946;
+const int ADC_UDARA = 1705;
 
 // ==================== TIMING ====================
 const unsigned long SENSOR_INTERVAL = 1000;
@@ -108,6 +105,12 @@ int daysLeft = 999;
 float dailyVolume[7] = {0};
 int dailyIndex = 0;
 unsigned long lastDayUpdate = 0;
+
+// ==================== FILTER REPLACEMENT ====================
+FilterHealth filterHealthResult;
+bool filterNeedReplacement = false;
+String filterReason = "";
+String filterRecommendation = "";
 
 // ==================== TDS CONSTANTS ====================
 #define VREF 3.3
@@ -187,9 +190,10 @@ void setup() {
     Serial.println("[TURBIDITY] Calibration loaded:");
     Serial.printf("  ADC_AIR   = %d\n", ADC_AIR);
     Serial.printf("  ADC_UDARA = %d\n", ADC_UDARA);
-    Serial.println("[TURBIDITY] Note: Low ADC values detected, sensor may need cleaning\n");
     
+    // ========== INIT WIFI ==========
     initWiFi();
+    
     if (wifiConnected) {
         initMQTT();
         mqttReconnect();
@@ -198,6 +202,17 @@ void setup() {
     prefs.begin("filter", true);
     displayVolumeL = prefs.getFloat("volume", 0.0);
     prefs.end();
+    
+    filterHealthResult.score = 100.0;
+    filterHealthResult.needReplacement = false;
+    filterHealthResult.reason = "Filter baru";
+    filterHealthResult.recommendation = "Kondisi filter sangat baik";
+    filterHealthResult.daysLeft = 30;
+    filterNeedReplacement = false;
+    filterReason = "Filter baru";
+    filterRecommendation = "Kondisi filter sangat baik";
+    filterHealth = 100.0;
+    daysLeft = 30;
     
     Serial.println("[OK] System ready!");
     Serial.println("========================================\n");
@@ -217,6 +232,158 @@ void setup() {
 }
 
 // ============================================================
+// WIFI
+// ============================================================
+void initWiFi() {
+    Serial.println("[WIFI] Starting WiFiManager...");
+    Serial.println("[WIFI] If not connected, open hotspot 'WaterMonitor'");
+    Serial.println("[WIFI] Password: water123");
+    Serial.println("[WIFI] Timeout: 60 seconds");
+    
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("WiFi Setup");
+    lcd.setCursor(0, 1);
+    lcd.print("Open Hotspot");
+    lcd.setCursor(0, 2);
+    lcd.print("WaterMonitor");
+    lcd.setCursor(0, 3);
+    lcd.print("pwd: water123");
+    
+    wifiManager.setConfigPortalTimeout(60);
+    wifiManager.setDebugOutput(true);
+    
+    unsigned long startTime = millis();
+    bool connected = wifiManager.autoConnect("WaterMonitor", "water123");
+    unsigned long elapsed = millis() - startTime;
+    
+    if (connected) {
+        wifiConnected = true;
+        Serial.println("[WIFI] ✅ Connected!");
+        Serial.printf("[WIFI] SSID: %s\n", WiFi.SSID().c_str());
+        Serial.printf("[WIFI] IP: %s\n", WiFi.localIP().toString().c_str());
+        Serial.printf("[WIFI] Connection time: %lu ms\n", elapsed);
+        
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("WiFi Connected!");
+        lcd.setCursor(0, 1);
+        lcd.print(WiFi.localIP().toString());
+        lcd.setCursor(0, 2);
+        lcd.print(WiFi.SSID().c_str());
+        delay(3000);
+        
+    } else {
+        wifiConnected = false;
+        Serial.println("[WIFI] ❌ Timeout - running OFFLINE mode");
+        
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("WiFi OFFLINE");
+        lcd.setCursor(0, 1);
+        lcd.print("Running Local");
+        lcd.setCursor(0, 2);
+        lcd.print("Sensor Active");
+        lcd.setCursor(0, 3);
+        lcd.print("No MQTT");
+        delay(3000);
+    }
+}
+
+// ============================================================
+// MQTT
+// ============================================================
+void initMQTT() {
+    mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+    mqttClient.setKeepAlive(30);
+}
+
+void mqttReconnect() {
+    if (mqttClient.connected()) return;
+    if (!wifiConnected) return;
+    
+    Serial.print("[MQTT] Connecting to broker...");
+    bool ok = mqttClient.connect(MQTT_CLIENT_ID);
+    if (ok) {
+        mqttConnected = true;
+        Serial.println(" ✅ Connected!");
+        Serial.print("[MQTT] Broker: ");
+        Serial.println(MQTT_BROKER);
+        Serial.print("[MQTT] Topic: ");
+        Serial.println(MQTT_TOPIC_ALL);
+        
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("MQTT Connected");
+        lcd.setCursor(0, 1);
+        lcd.print("Sending Data...");
+        delay(1000);
+        
+    } else {
+        mqttConnected = false;
+        Serial.print(" ❌ Failed! rc=");
+        Serial.println(mqttClient.state());
+    }
+}
+
+// ============================================================
+// PUBLISH MQTT - MINIMAL PAYLOAD
+// ============================================================
+void publishMQTT() {
+    if (!mqttConnected) {
+        return;
+    }
+    
+    // Payload minimal - hanya data ESSENTIAL
+    // Tanpa filter_reason dan filter_recommendation (terlalu panjang)
+    char json[280];
+    snprintf(json, sizeof(json),
+        "{"
+        "\"ph\":%.2f,"
+        "\"tds\":%.0f,"
+        "\"turbidity_ntu\":%.2f,"
+        "\"temperature\":%.2f,"
+        "\"status\":\"%s\","
+        "\"health\":%.0f,"
+        "\"days_left\":%d,"
+        "\"volume\":%.3f,"
+        "\"flow_rate\":%.2f,"
+        "\"filter_need_replacement\":%s,"
+        "\"filter_score\":%.0f,"
+        "\"ph_warning\":%s"
+        "}",
+        phValue,
+        tdsValue,
+        turbidityNTU,
+        temperatureC,
+        waterStatus.c_str(),
+        filterHealth,
+        daysLeft,
+        displayVolumeL,
+        flowRateLPM,
+        filterNeedReplacement ? "true" : "false",
+        filterHealth,
+        (phValue < 6.5 || phValue > 9.8) ? "true" : "false"
+    );
+    
+    int payloadLen = strlen(json);
+    Serial.printf("[MQTT] Payload size: %d bytes\n", payloadLen);
+    
+    bool success = mqttClient.publish(MQTT_TOPIC_ALL, json);
+    if (success) {
+        Serial.print(".");
+    } else {
+        Serial.println("[MQTT] ❌ Publish failed");
+        Serial.print("[MQTT] State: ");
+        Serial.println(mqttClient.state());
+        
+        // Coba reconnect
+        mqttConnected = false;
+        mqttReconnect();
+    }
+}
+
+// ============================================================
 // LOOP
 // ============================================================
 void loop() {
@@ -224,6 +391,12 @@ void loop() {
     
     if (mqttConnected) {
         mqttClient.loop();
+    } else if (wifiConnected) {
+        static unsigned long lastMQTTRetry = 0;
+        if (now - lastMQTTRetry > 10000) {
+            lastMQTTRetry = now;
+            mqttReconnect();
+        }
     }
     
     if (now - lastSensorRead >= SENSOR_INTERVAL) {
@@ -245,7 +418,9 @@ void loop() {
             mqttConnected = false;
             mqttReconnect();
         }
-        publishMQTT();
+        if (mqttConnected) {
+            publishMQTT();
+        }
     }
     
     if (Serial.available()) {
@@ -350,19 +525,16 @@ void readTemperature() {
     }
 }
 
-// ==================== TURBIDITY FUNCTIONS ====================
 float adcToNTU(int adc) {
-    // Menggunakan hasil kalibrasi
     float persenKekeruhan;
     
     if (adc >= ADC_AIR) {
-        persenKekeruhan = 0;  // Sangat jernih
+        persenKekeruhan = 0;
     }
     else if (adc <= ADC_UDARA) {
-        persenKekeruhan = 100; // Sangat keruh
+        persenKekeruhan = 100;
     }
     else {
-        // Mapping linear dari ADC ke persentase kekeruhan
         persenKekeruhan = 100.0 * (ADC_AIR - adc) / (ADC_AIR - ADC_UDARA);
     }
     
@@ -380,9 +552,8 @@ void readTurbidity() {
     turbidityADC = sum / AVG_SAMPLES;
     
     turbidityNTU = adcToNTU(turbidityADC);
-    turbidityPercent = 100.0 - turbidityNTU; // Persentase kejernihan
+    turbidityPercent = 100.0 - turbidityNTU;
     
-    // Status berdasarkan persentase kekeruhan
     if (turbidityNTU <= 10) turbStatus = "SANGAT JERNIH";
     else if (turbidityNTU <= 25) turbStatus = "JERNIH";
     else if (turbidityNTU <= 50) turbStatus = "CUKUP JERNIH";
@@ -399,7 +570,7 @@ void readSensors() {
 }
 
 // ============================================================
-// FLOW SENSOR FUNCTIONS
+// FLOW SENSOR
 // ============================================================
 void IRAM_ATTR flowISR() {
     pulseCount++;
@@ -490,43 +661,34 @@ void finishFlowCalibration() {
 }
 
 // ============================================================
-// FILTER HEALTH FUNCTIONS
+// FILTER HEALTH
 // ============================================================
 void updateFilterHealth() {
-    float volumeFactor = (displayVolumeL / 30000.0) * 100.0;
-    if (volumeFactor > 100.0) volumeFactor = 100.0;
-    float volumeScore = 100.0 - volumeFactor;
+    filterHealthResult = calculateFilterReplacement(
+        displayVolumeL,
+        phValue,
+        tdsValue,
+        temperatureC
+    );
     
-    float tdsScore = 0.0;
-    if (tdsValue <= 50) tdsScore = 100.0;
-    else if (tdsValue <= 100) tdsScore = 80.0;
-    else if (tdsValue <= 200) tdsScore = 60.0;
-    else if (tdsValue <= 300) tdsScore = 40.0;
-    else if (tdsValue <= 400) tdsScore = 20.0;
-    else tdsScore = 0.0;
+    filterNeedReplacement = filterHealthResult.needReplacement;
+    filterReason = filterHealthResult.reason;
+    filterRecommendation = filterHealthResult.recommendation;
+    filterHealth = filterHealthResult.score;
+    daysLeft = filterHealthResult.daysLeft;
     
-    float turbidityScore = 0.0;
-    if (turbidityNTU <= 10) turbidityScore = 100.0;
-    else if (turbidityNTU <= 25) turbidityScore = 80.0;
-    else if (turbidityNTU <= 50) turbidityScore = 60.0;
-    else if (turbidityNTU <= 75) turbidityScore = 40.0;
-    else turbidityScore = 20.0;
+    updateDailyVolume();
     
-    filterHealth = (volumeScore * 0.4) + (tdsScore * 0.3) + (turbidityScore * 0.3);
-    filterHealth = constrain(filterHealth, 0.0, 100.0);
+    prefs.begin("filter", false);
+    prefs.putFloat("volume", displayVolumeL);
+    prefs.end();
     
-    float avgDaily = 0;
-    int count = 0;
-    for (int i = 0; i < 7; i++) {
-        if (dailyVolume[i] > 0) {
-            avgDaily += dailyVolume[i];
-            count++;
-        }
+    if (filterNeedReplacement) {
+        beep(3);
+        Serial.println("⚠️ FILTER REPLACEMENT NEEDED!");
+        Serial.println(filterReason);
+        Serial.println(filterRecommendation);
     }
-    avgDaily = (count > 0) ? (avgDaily / count) : 1.0;
-    
-    float remaining = (displayVolumeL < 30000.0) ? (30000.0 - displayVolumeL) : 0;
-    daysLeft = (avgDaily > 0 && remaining > 0) ? ceil(remaining / avgDaily) : 0;
 }
 
 void updateDailyVolume() {
@@ -546,6 +708,9 @@ void resetFilterHealth() {
     dailyIndex = 0;
     filterHealth = 100.0;
     daysLeft = 999;
+    filterNeedReplacement = false;
+    filterReason = "Filter baru direset";
+    filterRecommendation = "Kondisi filter sangat baik";
     
     prefs.begin("filter", false);
     prefs.putFloat("volume", 0.0);
@@ -561,7 +726,7 @@ void checkWaterQuality() {
 }
 
 // ============================================================
-// LCD FUNCTIONS
+// LCD
 // ============================================================
 void updateLCD() {
     lcd.clear();
@@ -571,6 +736,10 @@ void updateLCD() {
     if (wifiConnected) {
         lcd.setCursor(19, 0);
         lcd.print("W");
+    }
+    if (mqttConnected) {
+        lcd.setCursor(18, 0);
+        lcd.print("M");
     }
     
     lcd.setCursor(0, 1);
@@ -592,77 +761,7 @@ void updateLCD() {
 }
 
 // ============================================================
-// WiFi & MQTT FUNCTIONS
-// ============================================================
-void initWiFi() {
-    wifiManager.setConfigPortalTimeout(120);
-    wifiManager.setDebugOutput(false);
-    Serial.println("[WIFI] Starting WiFiManager...");
-    Serial.println("[WIFI] If not connected, open hotspot 'WaterMonitor'");
-    
-    bool connected = wifiManager.autoConnect("WaterMonitor", "water123");
-    if (connected) {
-        wifiConnected = true;
-        Serial.printf("[WIFI] Connected to: %s\n", WiFi.SSID().c_str());
-        Serial.printf("[WIFI] IP: %s\n", WiFi.localIP().toString().c_str());
-    } else {
-        wifiConnected = false;
-        Serial.println("[WIFI] Timeout - running OFFLINE mode");
-    }
-}
-
-void initMQTT() {
-    mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
-    mqttClient.setKeepAlive(30);
-}
-
-void mqttReconnect() {
-    if (mqttClient.connected()) return;
-    if (!wifiConnected) return;
-    
-    Serial.print("[MQTT] Connecting...");
-    bool ok = mqttClient.connect(MQTT_CLIENT_ID);
-    if (ok) {
-        mqttConnected = true;
-        Serial.println(" OK");
-    } else {
-        mqttConnected = false;
-        Serial.printf(" FAILED (rc=%d)\n", mqttClient.state());
-    }
-}
-
-void publishMQTT() {
-    if (!mqttConnected) return;
-    
-    char json[512];
-    sprintf(json,
-        "{"
-        "\"ph\":%.2f,"
-        "\"tds\":%.0f,"
-        "\"turbidity_ntu\":%.2f,"
-        "\"temperature\":%.2f,"
-        "\"status\":\"%s\","
-        "\"health\":%.0f,"
-        "\"days_left\":%d,"
-        "\"volume\":%.3f,"
-        "\"flow_rate\":%.2f"
-        "}",
-        phValue,
-        tdsValue,
-        turbidityNTU,
-        temperatureC,
-        waterStatus.c_str(),
-        filterHealth,
-        daysLeft,
-        displayVolumeL,
-        flowRateLPM
-    );
-    
-    mqttClient.publish(MQTT_TOPIC_ALL, json);
-}
-
-// ============================================================
-// UTILITY FUNCTIONS
+// UTILITY
 // ============================================================
 void beep(int times) {
     for (int i = 0; i < times; i++) {
@@ -693,26 +792,15 @@ void printStatus() {
     Serial.println("╠═══════════════════════════════════════╣");
     Serial.printf("║ WiFi        : %s                ║\n", wifiConnected ? "Connected" : "Offline");
     Serial.printf("║ MQTT        : %s                ║\n", mqttConnected ? "Connected" : "Disconnected");
+    Serial.println("╠═══════════════════════════════════════╣");
+    Serial.println("║ FILTER REPLACEMENT STATUS           ║");
+    Serial.println("╠═══════════════════════════════════════╣");
+    Serial.printf("║ Need Replace: %s                ║\n", filterNeedReplacement ? "YA 🔴" : "TIDAK 🟢");
+    Serial.printf("║ Reason      : %s\n", filterReason.c_str());
+    Serial.printf("║ Recomendasi : %s\n", filterRecommendation.c_str());
     Serial.println("╚═══════════════════════════════════════╝\n");
-    
-    int lastADC = tdsADCBuf[(tdsIdx - 1 + AVG_SAMPLES) % AVG_SAMPLES];
-    float lastVoltage = lastADC * (VREF / ADC_RESOLUTION);
-    Serial.printf("[TDS DEBUG] ADC: %d, Voltage: %.4f V\n", lastADC, lastVoltage);
-    Serial.printf("[TURBIDITY] ADC: %d, AIR: %d, UDARA: %d\n", 
-                  turbidityADC, ADC_AIR, ADC_UDARA);
-    
-    // Peringatan jika sensor turbidity bermasalah
-    if (turbidityADC < 1000) {
-        Serial.println("\n⚠️ PERINGATAN: Sensor Turbidity bermasalah!");
-        Serial.println("   - ADC terlalu rendah (< 1000)");
-        Serial.println("   - Periksa koneksi sensor");
-        Serial.println("   - Bersihkan lensa sensor");
-    }
 }
 
-// ============================================================
-// TURBIDITY DEBUG & CALIBRATION
-// ============================================================
 void debugTurbidity() {
     Serial.println("\n╔═══════════════════════════════════════╗");
     Serial.println("║ TURBIDITY DEBUG                     ║");
@@ -724,27 +812,6 @@ void debugTurbidity() {
     Serial.printf("║ ADC_AIR     : %6d                 ║\n", ADC_AIR);
     Serial.printf("║ ADC_UDARA   : %6d                 ║\n", ADC_UDARA);
     Serial.println("╚═══════════════════════════════════════╝\n");
-    
-    // Analisis
-    if (turbidityADC >= ADC_AIR) {
-        Serial.println("✅ ADC >= AIR → Air SANGAT JERNIH (0% keruh)");
-    } else if (turbidityADC >= (ADC_AIR + ADC_UDARA) / 2) {
-        Serial.println("✅ ADC di atas titik tengah → Air JERNIH");
-    } else if (turbidityADC > ADC_UDARA) {
-        Serial.println("⚠️ ADC di bawah titik tengah → Air AGAK KERUH");
-    } else {
-        Serial.println("❌ ADC <= UDARA → Air SANGAT KERUH");
-    }
-    
-    Serial.println("\n⚠️ CATATAN:");
-    Serial.printf("   ADC AIR = %d (seharusnya > 3000)\n", ADC_AIR);
-    Serial.printf("   ADC UDARA = %d (seharusnya > 2000)\n", ADC_UDARA);
-    Serial.println("   Nilai ADC rendah menunjukkan sensor kotor atau rusak!");
-    Serial.println("\nSOLUSI:");
-    Serial.println("1. Bersihkan lensa sensor dengan kain lembut dan alkohol");
-    Serial.println("2. Periksa koneksi kabel sensor");
-    Serial.println("3. Jika masih rendah, ganti sensor");
-    Serial.println("");
 }
 
 void calibrateTurbidity() {
@@ -752,19 +819,9 @@ void calibrateTurbidity() {
     Serial.println("║ TURBIDITY CALIBRATION               ║");
     Serial.println("╚═══════════════════════════════════════╝\n");
     
-    Serial.println("⚠️ PERINGATAN:");
-    Serial.println("Nilai ADC Anda sangat rendah:");
-    Serial.printf("   ADC AIR = %d (seharusnya > 3000)\n", ADC_AIR);
-    Serial.printf("   ADC UDARA = %d (seharusnya > 2000)\n", ADC_UDARA);
-    Serial.println("\nIni menandakan sensor KOTOR atau RUSAK!");
-    Serial.println("Kalibrasi tetap bisa dilakukan tapi hasilnya tidak akurat.\n");
-    
     Serial.println("Step 1: Celupkan sensor ke AIR JERNIH...");
     Serial.println("Tekan ENTER jika sudah siap...");
-    
-    while (!Serial.available()) {
-        delay(100);
-    }
+    while (!Serial.available()) { delay(100); }
     Serial.read();
     
     long sumClear = 0;
@@ -780,10 +837,7 @@ void calibrateTurbidity() {
     
     Serial.println("Step 2: Angkat sensor ke UDARA...");
     Serial.println("Tekan ENTER jika sudah siap...");
-    
-    while (!Serial.available()) {
-        delay(100);
-    }
+    while (!Serial.available()) { delay(100); }
     Serial.read();
     
     long sumUdara = 0;
